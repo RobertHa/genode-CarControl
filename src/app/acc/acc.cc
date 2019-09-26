@@ -1,14 +1,16 @@
 #include <acc/acc.h>
 #include <base/log.h>
 #include <util/xml_node.h>
-#include <os/config.h>
+//#include <os/config.h>
+#include <base/attached_rom_dataspace.h>
 #include <string.h>
 #include <errno.h>
 #include <acc/types.h>
 #include <algorithm>
 #include <string.h>
+#include <stdio.h>
 
-acc::acc(const char* id) : mosquittopp(id)
+acc::acc(const char* id, Genode::Env &env) : mosquittopp(id)
 {
 	/* initialization */
 	sem_init(&allValSem, 0, 1);
@@ -16,7 +18,9 @@ acc::acc(const char* id) : mosquittopp(id)
 	mosqpp::lib_init();
 
 	/* configure mosquitto library */
-	Genode::Xml_node mosquitto = Genode::config()->xml_node().sub_node("mosquitto");
+	Genode::Attached_rom_dataspace config(env, "config");
+
+	Genode::Xml_node mosquitto = config.xml().sub_node("mosquitto");
 	try {
 		mosquitto.attribute("ip-address").value(this->host, sizeof(host));
 	} catch(Genode::Xml_node::Nonexistent_attribute) {
@@ -73,7 +77,8 @@ acc::acc(const char* id) : mosquittopp(id)
 	 ***************/
 	CommandDataOut cdo;  /* command data for the next simulation step */
 	char val[512];       /* buffer to convert values to string for mosq */
-	
+	snprintf(val, sizeof(val),"%d", 1);
+	myPublish("alive", val);
 	while(true) {
 		/* wait till we get all data */
 		sem_wait(&allData);

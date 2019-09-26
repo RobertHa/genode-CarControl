@@ -1,6 +1,7 @@
 #include <mosquittopp.h>
 #include <acc/types.h>
 #include <semaphore.h>
+#include <base/env.h>
 
 class acc : public mosqpp::mosquittopp
 {
@@ -24,10 +25,10 @@ class acc : public mosqpp::mosquittopp
 	int allValues;
 	sem_t allValSem;
 	sem_t allData;
-	struct SensorDataIn sdi;
+	struct SensorDataIn sdi = {0};
 
 public:
-	acc(const char *id);
+	acc(const char *id, Genode::Env &env);
 	~acc();
 private:
 	void on_connect(int rc);
