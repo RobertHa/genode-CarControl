@@ -9,9 +9,18 @@
 #include <algorithm>
 #include <string.h>
 #include <stdio.h>
+#include <timer_session/connection.h>
 
 acc::acc(const char* id, Genode::Env &env) : mosquittopp(id)
 {
+	Timer::Connection timer;
+	int starttime = 0;
+        int stoptime = 0;
+        int duration = 0;
+        int totalduration = 0;
+        int calculationroundscounter = 0;
+        int minval = 0;
+        int maxval = 0;
 	/* initialization */
 	sem_init(&allValSem, 0, 1);
 	sem_init(&allData, 0, 0);
@@ -27,10 +36,13 @@ acc::acc(const char* id, Genode::Env &env) : mosquittopp(id)
 		Genode::error("mosquitto ip-address is missing from config");
 	}
 	this->port = mosquitto.attribute_value<unsigned int>("port", 1883);
-	this->keepalive = mosquitto.attribute_value<unsigned int>("keepalive", 60);
+	this->keepalive = mosquitto.attribute_value<unsigned int>("keepalive", 120);
 
 	/* connect to mosquitto server */
 	int ret;
+	//Genode::log("I am where i connect to mosquitto.....");
+	Genode::log("mosquitto host should be at ",(const char *)host);
+
 	do {
 		ret = this->connect(host, port, keepalive);
 		switch(ret) {
@@ -38,10 +50,14 @@ acc::acc(const char* id, Genode::Env &env) : mosquittopp(id)
 			Genode::error("invalid parameter for mosquitto connect");
 			return;
 		case MOSQ_ERR_ERRNO:
-			break;
 			Genode::log("mosquitto ", (const char *)strerror(errno));
+		default:
+			timer.msleep(1000);
+			break;
 		}
 	} while(ret != MOSQ_ERR_SUCCESS);
+	
+	//Genode::log("We are connected!");
 
 	/* subscribe to topic */
 	do {
@@ -72,6 +88,7 @@ acc::acc(const char* id, Genode::Env &env) : mosquittopp(id)
 		}
 	}
 
+	//Genode::log("I am at main loop!");
 	/***************
 	 ** main loop **
 	 ***************/
@@ -81,8 +98,12 @@ acc::acc(const char* id, Genode::Env &env) : mosquittopp(id)
 	myPublish("alive", val);
 	while(true) {
 		/* wait till we get all data */
+		
+		//Genode::log("I am start waiting for data!");
 		sem_wait(&allData);
-
+                starttime = timer.elapsed_ms();
+		//Genode::log("I am done waiting, got data!");
+		
 		/* calculate commanddataout */
 		cdo = followDriving(this->sdi);
 
@@ -107,6 +128,28 @@ acc::acc(const char* id, Genode::Env &env) : mosquittopp(id)
 
 		snprintf(val, sizeof(val), "%d", cdo.gear);
 		myPublish("gear", val);
+
+                stoptime = timer.elapsed_ms();
+                duration = stoptime - starttime;
+                totalduration += duration;
+                calculationroundscounter++;
+
+                if (calculationroundscounter == 1)
+                {
+                        minval = duration;
+                }
+                minval = std::min(minval, duration);
+                maxval = std::max(maxval, duration);
+
+                if (calculationroundscounter % 50 == 0)
+                {
+                        Genode::log("The duration for calculation and sending was ", duration, " milliseconds");
+                        Genode::log("The TOTALduration for calculation and sending was ", totalduration, " milliseconds");
+                        Genode::log("The MINduration for calculation and sending was ", minval, " milliseconds");
+                        Genode::log("The MAXduration for calculation and sending was ", maxval, " milliseconds");
+                        Genode::log("The AVERAGEduration for calculation and sending was ", (totalduration / calculationroundscounter), " milliseconds after ", calculationroundscounter, " steps");
+                }
+
 	}
 }
 
@@ -121,6 +164,8 @@ acc::~acc() {
  * \param value value as string
  */
 void acc::myPublish(const char *type, const char *value) {
+	//Genode::log("I am publishing");
+	
 	char topic[1024];
 	strcpy(topic, "ecu/acc/");
 	strncat(topic, type, sizeof(topic));
@@ -129,6 +174,7 @@ void acc::myPublish(const char *type, const char *value) {
 
 void acc::on_message(const struct mosquitto_message *message)
 {
+	//Genode::log("I got a message!");
 	/* split type from topic */
 	char *type = strrchr(message->topic, '/') + 1;
 	/* get pointer to payload for convenience */
