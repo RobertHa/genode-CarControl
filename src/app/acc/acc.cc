@@ -1,7 +1,6 @@
 #include <acc/acc.h>
 #include <base/log.h>
 #include <util/xml_node.h>
-//#include <os/config.h>
 #include <base/attached_rom_dataspace.h>
 #include <string.h>
 #include <errno.h>
@@ -40,7 +39,6 @@ acc::acc(const char* id, Genode::Env &env) : mosquittopp(id)
 
 	/* connect to mosquitto server */
 	int ret;
-	//Genode::log("I am where i connect to mosquitto.....");
 	Genode::log("mosquitto host should be at ",(const char *)host);
 
 	do {
@@ -57,7 +55,6 @@ acc::acc(const char* id, Genode::Env &env) : mosquittopp(id)
 		}
 	} while(ret != MOSQ_ERR_SUCCESS);
 	
-	//Genode::log("We are connected!");
 
 	/* subscribe to topic */
 	do {
@@ -88,7 +85,6 @@ acc::acc(const char* id, Genode::Env &env) : mosquittopp(id)
 		}
 	}
 
-	//Genode::log("I am at main loop!");
 	/***************
 	 ** main loop **
 	 ***************/
@@ -164,8 +160,6 @@ acc::~acc() {
  * \param value value as string
  */
 void acc::myPublish(const char *type, const char *value) {
-	//Genode::log("I am publishing");
-	
 	char topic[1024];
 	strcpy(topic, "ecu/acc/");
 	strncat(topic, type, sizeof(topic));
@@ -174,7 +168,6 @@ void acc::myPublish(const char *type, const char *value) {
 
 void acc::on_message(const struct mosquitto_message *message)
 {
-	//Genode::log("I got a message!");
 	/* split type from topic */
 	char *type = strrchr(message->topic, '/') + 1;
 	/* get pointer to payload for convenience */
@@ -214,7 +207,7 @@ void acc::on_message(const struct mosquitto_message *message)
 	} else if (!strcmp(type, "steerLock")) {
 		sdi.steerLock = atof(value);
 	} else {
-		//Genode::log("unknown topic: ", (const char *)message->topic);
+		Genode::log("unknown topic: ", (const char *)message->topic);
 		return;
 	}
 
