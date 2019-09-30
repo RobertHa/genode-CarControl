@@ -51,8 +51,8 @@ set config {
 	<start name="savm">
 		<resource name="RAM" quantum="5M"/>
 		<config>
-			<mosquitto ip-address="10.0.0.1" />
-			<speed-dreams ip-address="10.0.0.1" port="9002" />
+			<mosquitto ip-address="10.200.45.6" />
+			<speed-dreams ip-address="10.200.45.6" port="9002" />
 			<network dhcp="yes" />
 		</config>
 	</start>

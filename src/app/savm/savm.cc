@@ -69,6 +69,22 @@ savm::savm(const char *id) : mosquittopp(id)
 			return;
 		}
 	} while(ret != MOSQ_ERR_SUCCESS);
+	
+	/* subscribe to topic */
+	do {
+		ret = this->subscribe(NULL, notify_topic);
+		switch(ret) {
+		case MOSQ_ERR_INVAL:
+			Genode::error("invalid parameter for mosquitto subscribe");
+			return;
+		case MOSQ_ERR_NOMEM:
+			Genode::error("out of memory condition occurred");
+			return;
+		case MOSQ_ERR_NO_CONN:
+			Genode::error("not connected to a broker");
+			return;
+		}
+	} while(ret != MOSQ_ERR_SUCCESS);
 
 	/* start non-blocking mosquitto loop */
 	loop_start();
@@ -117,9 +133,6 @@ savm::savm(const char *id) : mosquittopp(id)
 	/******************
 	 ** Message flow **
 	 ******************/
-	protobuf::SensorDataOut sdo;
-	protobuf::SensorDataOut_vec2 vec2;
-	char val[512] = { 0 };
 	uint32_t msg_len = 0;
 	std::string cdi_str;
 	char buffer[1024] = { 0 };
@@ -130,78 +143,19 @@ savm::savm(const char *id) : mosquittopp(id)
 		buffer[msg_len] = { '\0' };
 		readAllBytes(buffer, sock, msg_len);
 
+		starttime = timer.elapsed_ms();
 		/*******************
 		 ** SensorDataOut **
 		 *******************/
 		sdo.ParseFromArray(buffer, msg_len);
 
-		snprintf(val, sizeof(val), "%d", sdo.ispositiontracked());
-		myPublish("isPositionTracked", val);
-		
-		snprintf(val, sizeof(val), "%d", sdo.isspeedtracked());
-		myPublish("isSpeedTracked", val);
-		
-		vec2 = sdo.leadpos();
-		snprintf(val, sizeof(val), "%f,%f", vec2.x(), vec2.y());
-		myPublish("leadPos", val);
-
-		vec2 = sdo.ownpos();
-		snprintf(val, sizeof(val), "%f,%f", vec2.x(), vec2.y());
-		myPublish("ownPos", val);
-
-		vec2 = sdo.cornerfrontright();
-		snprintf(val, sizeof(val), "%f,%f", vec2.x(), vec2.y());
-		myPublish("cornerFrontRight", val);
-
-		vec2 = sdo.cornerfrontleft();
-		snprintf(val, sizeof(val), "%f,%f", vec2.x(), vec2.y());
-		myPublish("cornerFrontLeft", val);
-
-		vec2 = sdo.cornerrearright();
-		snprintf(val, sizeof(val), "%f,%f", vec2.x(), vec2.y());
-		myPublish("cornerRearRight", val);
-
-		vec2 = sdo.cornerrearleft();
-		snprintf(val, sizeof(val), "%f,%f", vec2.x(), vec2.y());
-		myPublish("cornerRearLeft", val);
-
-		snprintf(val, sizeof(val), "%f", sdo.leadspeed());
-		myPublish("leadSpeed", val);
-
-		snprintf(val, sizeof(val), "%f", sdo.ownspeed());
-		myPublish("ownSpeed", val);
-
-		snprintf(val, sizeof(val), "%d", sdo.curgear());
-		myPublish("curGear", val);
-
-		snprintf(val, sizeof(val), "%f", sdo.steerlock());
-		myPublish("steerLock", val);
-
-		snprintf(val, sizeof(val), "%f", sdo.enginerpm());
-		myPublish("enginerpm", val);
-
-		snprintf(val, sizeof(val), "%f", sdo.enginerpmmax());
-		myPublish("enginerpmMax", val);
-
-		snprintf(val, sizeof(val), "%f", sdo.steer());
-		myPublish("steer", val);
-
-		snprintf(val, sizeof(val), "%f", sdo.brakefl());
-		myPublish("brakeFL", val);
-
-		snprintf(val, sizeof(val), "%f", sdo.brakefr());
-		myPublish("brakeFR", val);
-
-		snprintf(val, sizeof(val), "%f", sdo.brakerl());
-		myPublish("brakeRL", val);
-
-		snprintf(val, sizeof(val), "%f", sdo.brakerr());
-		myPublish("brakeRR", val);
+		publishAllData();
 
 		/*******************
 		 ** CommandDataIn **
 		 *******************/
 		/* wait for data */
+		initialized = true;
 		sem_wait(&allData);
 
 		/* prepare message */
@@ -211,7 +165,8 @@ savm::savm(const char *id) : mosquittopp(id)
 					   sizeof(msg_len));       // append message length
 		cdi.AppendToString(&cdi_str);          // append cdi
 		msg_len = cdi_str.size();              // get #bytes to transmit
-
+		
+		Genode::log("To SD2 message: ", cdi.accel()); // provides feedback that steps are performmed
 		/* send message */
 		int ret = lwip_write(sock, cdi_str.c_str(), msg_len);
 		if (ret == -1) {
@@ -222,7 +177,96 @@ savm::savm(const char *id) : mosquittopp(id)
 						  " vs. ",
 						  msg_len);
 		}
+		stoptime = timer.elapsed_ms();
+        	duration = stoptime - starttime;
+        	totalduration += duration;
+        	calculationroundscounter++;
+
+        	if (calculationroundscounter == 1)
+        	{
+            		minval = duration;
+        	}
+        	minval = std::min(minval, duration);
+        	maxval = std::max(maxval, duration);
+
+        	if (calculationroundscounter % 50 == 0)
+        	{
+            		Genode::log("The duration for calculation and sending was ", duration, " milliseconds");
+            		Genode::log("The TOTALduration for calculation and sending was ", totalduration, " milliseconds");
+            		Genode::log("The MINduration for calculation and sending was ", minval, " milliseconds");
+            		Genode::log("The MAXduration for calculation and sending was ", maxval, " milliseconds");
+            		Genode::log("The AVERAGEduration for calculation and sending was ", (totalduration / calculationroundscounter), " milliseconds after ", calculationroundscounter, " steps");
+        	}
 	}
+}
+
+
+void savm::publishAllData(){
+	char val[512] = { 0 };
+	snprintf(val, sizeof(val), "%d", sdo.ispositiontracked());
+	myPublish("isPositionTracked", val);
+
+	snprintf(val, sizeof(val), "%d", sdo.isspeedtracked());
+	myPublish("isSpeedTracked", val);
+
+	vec2 = sdo.leadpos();
+	snprintf(val, sizeof(val), "%f,%f", vec2.x(), vec2.y());
+	myPublish("leadPos", val);
+
+	vec2 = sdo.ownpos();
+	snprintf(val, sizeof(val), "%f,%f", vec2.x(), vec2.y());
+	myPublish("ownPos", val);
+
+	vec2 = sdo.cornerfrontright();
+	snprintf(val, sizeof(val), "%f,%f", vec2.x(), vec2.y());
+	myPublish("cornerFrontRight", val);
+
+	vec2 = sdo.cornerfrontleft();
+	snprintf(val, sizeof(val), "%f,%f", vec2.x(), vec2.y());
+	myPublish("cornerFrontLeft", val);
+
+	vec2 = sdo.cornerrearright();
+	snprintf(val, sizeof(val), "%f,%f", vec2.x(), vec2.y());
+	myPublish("cornerRearRight", val);
+
+	vec2 = sdo.cornerrearleft();
+	snprintf(val, sizeof(val), "%f,%f", vec2.x(), vec2.y());
+	myPublish("cornerRearLeft", val);
+
+	snprintf(val, sizeof(val), "%f", sdo.leadspeed());
+	myPublish("leadSpeed", val);
+
+	snprintf(val, sizeof(val), "%f", sdo.ownspeed());
+	myPublish("ownSpeed", val);
+
+	snprintf(val, sizeof(val), "%d", sdo.curgear());
+	myPublish("curGear", val);
+
+	snprintf(val, sizeof(val), "%f", sdo.steerlock());
+	myPublish("steerLock", val);
+
+	snprintf(val, sizeof(val), "%f", sdo.enginerpm());
+	myPublish("enginerpm", val);
+
+	snprintf(val, sizeof(val), "%f", sdo.enginerpmmax());
+	myPublish("enginerpmMax", val);
+
+	snprintf(val, sizeof(val), "%f", sdo.steer());
+	myPublish("steer", val);
+
+	snprintf(val, sizeof(val), "%f", sdo.brakefl());
+	myPublish("brakeFL", val);
+
+	snprintf(val, sizeof(val), "%f", sdo.brakefr());
+	myPublish("brakeFR", val);
+
+	snprintf(val, sizeof(val), "%f", sdo.brakerl());
+	myPublish("brakeRL", val);
+
+	snprintf(val, sizeof(val), "%f", sdo.brakerr());
+	myPublish("brakeRR", val);
+
+	allValues = 0;
 }
 
 void savm::myPublish(const char *type, const char *value) {
@@ -254,6 +298,13 @@ void savm::on_message(const struct mosquitto_message *message)
 		cdi.set_brakerr(atof(value));
 	} else if (!strcmp(type, "gear")) {
 		cdi.set_gear(atoi(value));
+	} else if (!strcmp(type, "alive")) {
+		if (initialized) {
+			publishAllData();
+			Genode::log("initialized is true");
+		}
+		Genode::log("received topic: ", (const char *)message->topic);
+		return;
 	} else {
 		Genode::log("unknown topic: ", (const char *)message->topic);
 		return;
